@@ -4,6 +4,25 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0"/>
 <title>SSR NEXUS — AI Life Agent</title>
+
+<script>
+(function(apiKey){
+    (function(p,e,n,d,o){var v,w,x,y,z;o=p[d]=p[d]||{};o._q=o._q||[];
+    v=['initialize','identify','updateOptions','pageLoad','track','trackAgent'];
+    for(w=0,x=v.length;w<x;++w)(function(m){
+    o[m]=o[m]||function(){
+      o._q[m===v[0]?'unshift':'push']([m].concat([].slice.call(arguments,0)));
+    };
+    })(v[w]);
+    y=e.createElement(n);
+    y.async=!0;
+    y.src='https://cdn.pendo.io/agent/static/48126691-afb9-4378-a57f-9a401d35c57e/pendo.js';
+    z=e.getElementsByTagName(n)[0];
+    z.parentNode.insertBefore(y,z);
+    })(window,document,'script','pendo');
+})('48126691-afb9-4378-a57f-9a401d35c57e');
+</script>
+
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
 <style>
 :root{
@@ -548,6 +567,13 @@ async function sendMsg(){
   }
 }
 
+// ── BOOT ───────────────────────────────────────────────────────────────────
+window.onload = () => {
+  pendo.initialize({ visitor: { id: '' } });
+  if (GEMINI_KEY || GROQ_KEY) {
+    if (!GEMINI_KEY) AI_MODE = "groq";
+    else if (!GROQ_KEY) AI_MODE = "gemini";
+    hideSetup();
 async function callGroq(){
   const msgs = [{role:"system",content:SYSTEM},...conversation.slice(-20)];
   const res = await fetch(GROQ_API,{
