@@ -549,6 +549,11 @@ let msgCount   = parseInt(localStorage.getItem("hena_msgcount")    || "0");
 let eiCount    = parseInt(localStorage.getItem("hena_ei_count")    || "0");
 let emoHistory = JSON.parse(localStorage.getItem("hena_emo_hist")  || "[]");
 
+// ── PENDO TRACK AGENT ─────────────────────────────────────────────────────
+const PENDO_AGENT_ID = "g3gr9c4AavwUqcZtoHLxqk1tT9c";
+const pendoConversationId = crypto.randomUUID();
+let _pendoIsSuggestedPrompt = false;
+
 // ── EMOTION ENGINE ─────────────────────────────────────────────────────────
 const EMO_PATTERNS = {
   sad:      /\b(sad|unhappy|depressed|crying|hurt|pain|lonely|miss|grief|heartbreak|upset|miserable|terrible|awful|hopeless|down)\b/i,
@@ -717,12 +722,24 @@ function integrationAction(type) {
 const inp = document.getElementById("msgInput");
 inp.addEventListener("input", () => { inp.style.height="auto"; inp.style.height=Math.min(inp.scrollHeight,110)+"px"; });
 inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey) { e.preventDefault(); sendMsg(); } });
-function qs(text) { inp.value = text; sendMsg(); }
+function qs(text) { inp.value = text; _pendoIsSuggestedPrompt = true; sendMsg(); }
 
 // ── SEND ───────────────────────────────────────────────────────────────────
 async function sendMsg() {
   const text = inp.value.trim();
   if (!text) return;
+  const pendoMsgId = crypto.randomUUID();
+  const wasSuggested = _pendoIsSuggestedPrompt;
+  _pendoIsSuggestedPrompt = false;
+  if (typeof pendo !== "undefined" && pendo.trackAgent) {
+    pendo.trackAgent("prompt", {
+      agentId: PENDO_AGENT_ID,
+      conversationId: pendoConversationId,
+      messageId: pendoMsgId,
+      content: text,
+      suggestedPrompt: wasSuggested
+    });
+  }
   document.getElementById("welcomeBlock")?.remove();
   addMsg("user", text);
   inp.value = ""; inp.style.height = "auto";
@@ -743,6 +760,14 @@ async function sendMsg() {
   if (localReply !== null) {
     removeTyping(tid);
     addMsg("hena", localReply, emotion, null);
+    if (typeof pendo !== "undefined" && pendo.trackAgent) {
+      pendo.trackAgent("agent_response", {
+        agentId: PENDO_AGENT_ID,
+        conversationId: pendoConversationId,
+        messageId: `agent_response_${Date.now()}`,
+        content: localReply
+      });
+    }
     document.getElementById("sendBtn").disabled = false;
     return;
   }
@@ -752,6 +777,15 @@ async function sendMsg() {
     removeTyping(tid);
     const processed = parseAIActions(reply);
     addMsg("hena", processed, emotion, recs.length ? recs[0] : null);
+    if (typeof pendo !== "undefined" && pendo.trackAgent) {
+      pendo.trackAgent("agent_response", {
+        agentId: PENDO_AGENT_ID,
+        conversationId: pendoConversationId,
+        messageId: `agent_response_${Date.now()}`,
+        content: processed,
+        modelUsed: AI_MODE === "gemini" ? "gemini-1.5-flash" : "llama-3.3-70b-versatile"
+      });
+    }
   } catch(e) {
     removeTyping(tid);
     addMsg("hena", `⚠️ AI error: ${e.message}\n\nCheck your API key in ⚙ Keys`);
