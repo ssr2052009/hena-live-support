@@ -583,6 +583,17 @@ function applyEmotion(emotion) {
   localStorage.setItem("hena_ei_count", eiCount);
   document.getElementById("eiCount").textContent = eiCount;
   renderEmoLog();
+
+  // Pendo: track non-neutral emotion detection
+  if (emotion !== "neutral" && typeof pendo !== "undefined") {
+    pendo.track("emotion_detected", {
+      emotion: emotion,
+      eq_mode_label: cfg.label,
+      ei_count_total: eiCount,
+      emotion_history_length: emoHistory.length
+    });
+  }
+
   return cfg;
 }
 
@@ -666,20 +677,42 @@ function activateHena() {
   const g = document.getElementById("geminiInput").value.trim();
   const gr = document.getElementById("groqInput").value.trim();
   if (!g && !gr) { alert("Enter at least one API key!"); return; }
+  const isFirstSetup = !localStorage.getItem("hena_gemini") && !localStorage.getItem("hena_groq");
   if (g)  { GEMINI_KEY = g;  localStorage.setItem("hena_gemini", g); AI_MODE = "gemini"; }
   if (gr) { GROQ_KEY   = gr; localStorage.setItem("hena_groq",   gr); if (!g) AI_MODE = "groq"; }
   localStorage.setItem("hena_mode", AI_MODE);
   document.getElementById("aiLabel").textContent = AI_MODE === "gemini" ? "Gemini" : "Groq/Llama";
   document.getElementById("toggleBtn").style.display = (GEMINI_KEY && GROQ_KEY) ? "block" : "none";
+
+  // Pendo: track API key configuration
+  if (typeof pendo !== "undefined") {
+    pendo.track("api_key_configured", {
+      has_gemini_key: !!g,
+      has_groq_key: !!gr,
+      selected_ai_mode: AI_MODE,
+      is_first_setup: isFirstSetup
+    });
+  }
+
   hideSetup();
 }
 function hideSetup() { document.getElementById("setupScreen").style.display = "none"; }
 function showSetup()  { document.getElementById("setupScreen").style.display = "flex"; }
 function toggleAI() {
   if (!GEMINI_KEY || !GROQ_KEY) return;
+  const previousMode = AI_MODE;
   AI_MODE = AI_MODE === "gemini" ? "groq" : "gemini";
   localStorage.setItem("hena_mode", AI_MODE);
   document.getElementById("aiLabel").textContent = AI_MODE === "gemini" ? "Gemini" : "Groq/Llama";
+
+  // Pendo: track AI model switch
+  if (typeof pendo !== "undefined") {
+    pendo.track("ai_model_switched", {
+      previous_mode: previousMode,
+      new_mode: AI_MODE
+    });
+  }
+
   addMsg("hena", `Switched to ${AI_MODE === "gemini" ? "Gemini ✨" : "Groq/Llama 🚀"} — still your Hena, just a different brain for now!`);
 }
 
@@ -698,7 +731,16 @@ async function fetchWeather() {
       const res  = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}&current_weather=true`);
       const data = await res.json();
       const temp = Math.round(data.current_weather?.temperature);
-      if (temp !== undefined) document.getElementById("wStatus").textContent = `${temp}°C`;
+      if (temp !== undefined) {
+        document.getElementById("wStatus").textContent = `${temp}°C`;
+        // Pendo: track successful weather data fetch
+        if (typeof pendo !== "undefined") {
+          pendo.track("weather_data_fetched", {
+            temperature_celsius: temp,
+            has_geolocation_permission: true
+          });
+        }
+      }
     }, () => {});
   } catch(e) {}
 }
@@ -733,16 +775,50 @@ async function sendMsg() {
   const emotion = detectEmotion(text);
   const eqCfg   = applyEmotion(emotion);
   const recs     = getRecs(text);
-  if (recs.length) renderRecPanel(recs);
+  if (recs.length) {
+    renderRecPanel(recs);
+    // Pendo: track recommendation generation
+    if (typeof pendo !== "undefined") {
+      pendo.track("recommendation_generated", {
+        recommendation_count: recs.length,
+        recommendation_labels: recs.map(r => r.label).join(", "),
+        trigger_emotion: emotion
+      });
+    }
+  }
 
   // Habits
   const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 4);
-  if (words[0]) { habits[words[0]] = (habits[words[0]]||0)+1; localStorage.setItem("hena_habits",JSON.stringify(habits)); renderHabits(); }
+  if (words[0]) {
+    habits[words[0]] = (habits[words[0]]||0)+1;
+    localStorage.setItem("hena_habits",JSON.stringify(habits));
+    renderHabits();
+    // Pendo: track habit keyword detection
+    if (typeof pendo !== "undefined") {
+      pendo.track("habit_tracked", {
+        habit_keyword: words[0],
+        habit_frequency: habits[words[0]],
+        total_habits_tracked: Object.keys(habits).length
+      });
+    }
+  }
 
   const localReply = handleLocal(text);
   if (localReply !== null) {
     removeTyping(tid);
     addMsg("hena", localReply, emotion, null);
+    // Pendo: track chat message sent (local command)
+    if (typeof pendo !== "undefined") {
+      pendo.track("chat_message_sent", {
+        ai_mode: AI_MODE,
+        emotion_detected: emotion,
+        message_length: text.length,
+        has_recommendation: recs.length > 0,
+        is_local_command: true,
+        message_count_total: msgCount + 1,
+        response_success: true
+      });
+    }
     document.getElementById("sendBtn").disabled = false;
     return;
   }
@@ -752,9 +828,29 @@ async function sendMsg() {
     removeTyping(tid);
     const processed = parseAIActions(reply);
     addMsg("hena", processed, emotion, recs.length ? recs[0] : null);
+    // Pendo: track chat message sent (AI response)
+    if (typeof pendo !== "undefined") {
+      pendo.track("chat_message_sent", {
+        ai_mode: AI_MODE,
+        emotion_detected: emotion,
+        message_length: text.length,
+        has_recommendation: recs.length > 0,
+        is_local_command: false,
+        message_count_total: msgCount + 1,
+        response_success: true
+      });
+    }
   } catch(e) {
     removeTyping(tid);
     addMsg("hena", `⚠️ AI error: ${e.message}\n\nCheck your API key in ⚙ Keys`);
+    // Pendo: track AI response error
+    if (typeof pendo !== "undefined") {
+      pendo.track("ai_response_error", {
+        ai_mode: AI_MODE,
+        error_message: (e.message || "unknown").substring(0, 200),
+        message_count_total: msgCount + 1
+      });
+    }
   }
 
   msgCount++;
@@ -771,7 +867,14 @@ function handleLocal(text) {
     return "📋 **Your Reminders:**\n\n" + reminders.map((r,i) => `${i+1}. ${r.text}${r.time ? " — ⏰ "+r.time : ""}`).join("\n");
   }
   if ((t.includes("clear")||t.includes("delete")) && t.includes("reminder")) {
+    const clearedCount = reminders.length;
     reminders = []; localStorage.setItem("hena_reminders","[]"); renderReminders();
+    // Pendo: track bulk reminder clearing
+    if (typeof pendo !== "undefined") {
+      pendo.track("reminders_bulk_cleared", {
+        reminders_cleared_count: clearedCount
+      });
+    }
     return "All reminders cleared, Master! Fresh start 🧹";
   }
   return null;
@@ -846,6 +949,14 @@ You are Hena. Make Master feel supported, capable, and never alone.`;
     if (!res.ok) {
       const e = await res.json();
       if (e.error?.code==="rate_limit_exceeded") {
+        // Pendo: track AI model fallback due to rate limiting
+        if (typeof pendo !== "undefined") {
+          pendo.track("ai_model_fallback", {
+            primary_model: "llama-3.3-70b-versatile",
+            fallback_model: "llama3-8b-8192",
+            error_code: "rate_limit_exceeded"
+          });
+        }
         const r2 = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method:"POST", headers:{"Content-Type":"application/json","Authorization":`Bearer ${GROQ_KEY}`},
           body: JSON.stringify({ model:"llama3-8b-8192", messages:[{role:"system",content:systemPrompt},...messages], max_tokens:500, temperature:0.85 })
@@ -875,6 +986,14 @@ function parseAIActions(reply) {
     reminders.push({ text:m[1].trim(), time:m[2]?.trim()||"", ts:Date.now() });
     localStorage.setItem("hena_reminders", JSON.stringify(reminders));
     renderReminders();
+    // Pendo: track reminder creation from AI response
+    if (typeof pendo !== "undefined") {
+      pendo.track("reminder_created", {
+        reminder_text: m[1].trim().substring(0, 100),
+        has_time: !!m[2]?.trim(),
+        total_reminders_count: reminders.length
+      });
+    }
   }
   return reply.replace(/\[REMINDER:[^\]]+\]/gi,"").trim();
 }
@@ -941,7 +1060,17 @@ function renderReminders() {
       <button class="del-btn" onclick="deleteReminder(${i})" title="Delete">✕</button>
     </div>`).join("");
 }
-function deleteReminder(i) { reminders.splice(i,1); localStorage.setItem("hena_reminders",JSON.stringify(reminders)); renderReminders(); }
+function deleteReminder(i) {
+  reminders.splice(i,1);
+  localStorage.setItem("hena_reminders",JSON.stringify(reminders));
+  renderReminders();
+  // Pendo: track individual reminder deletion
+  if (typeof pendo !== "undefined") {
+    pendo.track("reminder_deleted", {
+      remaining_reminders_count: reminders.length
+    });
+  }
+}
 
 function renderHabits() {
   const el = document.getElementById("habitList");
@@ -1020,6 +1149,18 @@ async function runScan() {
     showScanModal(results);
     const crit=flagged.filter(f=>f.score>=85).length;
     const high=flagged.filter(f=>f.score>=65&&f.score<85).length;
+    // Pendo: track file security scan completion
+    if (typeof pendo !== "undefined") {
+      pendo.track("file_security_scan_completed", {
+        directory_name: dir.name,
+        total_files_scanned: results.count,
+        total_size_bytes: results.totalSize,
+        critical_count: crit,
+        high_count: high,
+        flagged_count: flagged.length,
+        clean_count: results.count - flagged.length
+      });
+    }
     if(crit>0) addMsg("hena",`⚠️ Found **${crit} CRITICAL** file${crit>1?"s":""} in that folder, Master! Please check the scan report — these could be dangerous. Stay safe! 🛡️`);
     else if(high>0) addMsg("hena",`Found **${high} high-risk** file${high>1?"s":""} worth reviewing. Check the scan results! 🔍`);
     else if(flagged.length>0) addMsg("hena",`Scan complete! ${flagged.length} suspicious file${flagged.length>1?"s":""} found, nothing critical. Stay aware though 👀`);
@@ -1086,6 +1227,22 @@ async function runUrlScan() {
     results.push({...check,...r}); max+=check.weight; if(r.pass)score+=check.weight;
   }
   const pct=Math.round(score/max*100);
+  const grade=pct>=90?"A":pct>=80?"B":pct>=70?"C":pct>=50?"D":"F";
+  const passed=results.filter(r=>r.pass===true).length;
+  const failed=results.filter(r=>r.pass===false).length;
+  // Pendo: track web security scan completion
+  if (typeof pendo !== "undefined") {
+    pendo.track("web_security_scan_completed", {
+      scanned_url: url.substring(0, 200),
+      domain: domain,
+      security_score: pct,
+      security_grade: grade,
+      checks_passed: passed,
+      checks_failed: failed,
+      fetch_successful: fetchOk,
+      uses_https: url.startsWith("https://")
+    });
+  }
   showUrlModal(url,domain,results,pct,fetchOk);
   if(pct>=80) addMsg("hena",`**${domain}** scored **${pct}/100** — looking solid, Master! A few headers to tighten but overall good security posture 🛡️✅`);
   else if(pct>=50) addMsg("hena",`**${domain}** scored **${pct}/100** — some real concerns here. Check the security report for what needs fixing 🔍`);
